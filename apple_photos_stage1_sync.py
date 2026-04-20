@@ -1505,8 +1505,8 @@ def extract_memories(
     memory_map = {row["memory_pk"]: row for row in memories if row["memory_pk"] is not None}
     memory_asset_rows: list[dict[str, Any]] = []
     for table, relation_type in find_memory_junction_tables(inspector):
-        memory_col = inspector.choose_column(table, contains_all=("memor",))
-        asset_col = inspector.choose_column(table, contains_all=("asset",))
+        memory_col = inspector.choose_column(table, contains_all=("memor",), excludes=("fok",))
+        asset_col = inspector.choose_column(table, contains_all=("asset",), excludes=("fok",))
         if not memory_col or not asset_col:
             continue
         rows = conn.execute(f"SELECT {memory_col} AS memory_pk, {asset_col} AS asset_pk FROM {table}").fetchall()
@@ -1598,12 +1598,41 @@ def extract_moments(conn: sqlite3.Connection, inspector: SqliteInspector) -> lis
 
 
 def find_album_junction_table(inspector: SqliteInspector) -> str | None:
+    """Pick the Apple M2M junction table linking ZGENERICALBUM <-> ZASSET.
+
+    Modern Photos.sqlite uses Z_{N}ASSETS tables (e.g. Z_33ASSETS) with one
+    column containing "album" and another containing "asset". We exclude
+    unrelated tables like Z_{N}KEYASSETS (album cover picks) and
+    Z_{N}ALBUMLISTS (hierarchy parenting), and require the two columns to be
+    distinct so single-column composite names like
+    ``Z_32ALBUMSBEINGKEYASSETS`` don't match both lookups.
+    """
+    import re
+
+    m2m_pattern = re.compile(r"^Z_\d+[A-Z]")
+    candidates: list[tuple[int, str]] = []
     for table in inspector.tables():
+        if table == "ZGENERICALBUM":
+            continue
+        upper = table.upper()
+        if "KEYASSET" in upper or "ALBUMLIST" in upper:
+            continue
         cols = inspector.columns(table)
-        if any("album" in col.lower() for col in cols) and any("asset" in col.lower() for col in cols):
-            if table != "ZGENERICALBUM":
-                return table
-    return None
+        album_cols = [c for c in cols if "album" in c.lower() and "fok" not in c.lower()]
+        asset_cols = [c for c in cols if "asset" in c.lower() and "fok" not in c.lower() and c not in album_cols]
+        if not album_cols or not asset_cols:
+            continue
+        score = 0
+        if m2m_pattern.match(table):
+            score += 10
+        if upper.endswith("ASSETS"):
+            score += 5
+        candidates.append((score, table))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda t: t[0], reverse=True)
+    return candidates[0][1]
 
 
 def extract_albums(
@@ -1652,9 +1681,13 @@ def extract_albums(
     album_asset_rows: list[dict[str, Any]] = []
     junction_table = find_album_junction_table(inspector)
     if junction_table:
-        album_col = inspector.choose_column(junction_table, contains_all=("album",))
-        asset_col = inspector.choose_column(junction_table, contains_all=("asset",))
-        if album_col and asset_col:
+        album_col = inspector.choose_column(junction_table, contains_all=("album",), excludes=("fok",))
+        asset_col = inspector.choose_column(
+            junction_table,
+            contains_all=("asset",),
+            excludes=("fok",) + ((album_col.lower(),) if album_col else ()),
+        )
+        if album_col and asset_col and album_col != asset_col:
             rows = conn.execute(f"SELECT {album_col} AS album_pk, {asset_col} AS asset_pk FROM {junction_table}").fetchall()
             for row in rows:
                 asset = assets_by_pk.get(to_int(row["asset_pk"]) or -1)
@@ -1675,13 +1708,22 @@ def extract_albums(
 
 
 def find_keyword_junction_table(inspector: SqliteInspector) -> str | None:
+    import re
+
+    m2m_pattern = re.compile(r"^Z_\d+[A-Z]")
+    candidates: list[str] = []
     for table in inspector.tables():
-        cols = inspector.columns(table)
         if table == "ZKEYWORD":
             continue
-        if any("keyword" in col.lower() for col in cols) and any("asset" in col.lower() for col in cols):
+        cols = inspector.columns(table)
+        if not (any("keyword" in col.lower() for col in cols) and any("asset" in col.lower() for col in cols)):
+            continue
+        candidates.append(table)
+
+    for table in candidates:
+        if m2m_pattern.match(table):
             return table
-    return None
+    return candidates[0] if candidates else None
 
 
 def extract_keywords(
@@ -1716,8 +1758,8 @@ def extract_keywords(
     keyword_asset_rows: list[dict[str, Any]] = []
     junction_table = find_keyword_junction_table(inspector)
     if junction_table:
-        keyword_col = inspector.choose_column(junction_table, contains_all=("keyword",))
-        asset_col = inspector.choose_column(junction_table, contains_all=("asset",))
+        keyword_col = inspector.choose_column(junction_table, contains_all=("keyword",), excludes=("fok",))
+        asset_col = inspector.choose_column(junction_table, contains_all=("asset",), excludes=("fok",))
         if keyword_col and asset_col:
             rows = conn.execute(
                 f"SELECT {keyword_col} AS keyword_pk, {asset_col} AS asset_pk FROM {junction_table}"
