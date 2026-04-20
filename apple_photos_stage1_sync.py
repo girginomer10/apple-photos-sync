@@ -2566,7 +2566,22 @@ class PostgresSink:
         """
         self.execute(sql)
 
+    def canonical_tables_present(self) -> bool:
+        sql = """
+        SELECT
+          to_regclass('public.media_assets') IS NOT NULL AS has_assets,
+          to_regclass('public.media_asset_origins') IS NOT NULL AS has_origins
+        """
+        with self.conn.cursor() as cur:
+            cur.execute(sql)
+            row = cur.fetchone()
+        if row is None:
+            return False
+        return bool(row[0]) and bool(row[1])
+
     def fetch_origin_map(self) -> dict[str, str]:
+        if not self.canonical_tables_present():
+            return {}
         sql = """
         SELECT source_item_id, media_asset_id::text
         FROM media_asset_origins
@@ -2594,6 +2609,8 @@ class PostgresSink:
         self.conn.commit()
 
     def sync_canonical_media(self) -> None:
+        if not self.canonical_tables_present():
+            return
         update_sql = """
         UPDATE media_assets AS ma
         SET
@@ -3061,8 +3078,14 @@ def main() -> int:
                     )
                     eprint(f"[photos] scene labels inserted: {scene_row_count:,}")
 
-            sink.sync_canonical_media()
-            eprint("[postgres] canonical media_assets/media_asset_origins sync complete")
+            if sink.canonical_tables_present():
+                sink.sync_canonical_media()
+                eprint("[postgres] canonical media_assets/media_asset_origins sync complete")
+            else:
+                eprint(
+                    "[postgres] media_assets/media_asset_origins not found — "
+                    "skipping canonical sync (see README for the optional schema)"
+                )
 
         matched_assets = sum(1 for asset in assets if asset.canonical_media_asset_id)
         print(
