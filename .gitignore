@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Environments & secrets
+.env
+.env.*
+*.pem
+*.key
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Tests & artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+full-archive-test/
+full-archive-test-blob/
+*.photoslibrary/
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
