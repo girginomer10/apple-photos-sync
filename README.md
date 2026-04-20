@@ -30,7 +30,7 @@ The script populates `apple_photos_*` tables (full refresh every run) and option
 ## Install
 
 ```bash
-git clone https://github.com/<you>/apple-photos-sync.git
+git clone https://github.com/girginomer10/apple-photos-sync.git
 cd apple-photos-sync
 python3 -m venv .venv
 source .venv/bin/activate
